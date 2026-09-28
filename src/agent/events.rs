@@ -416,6 +416,8 @@ fn apply_test_results(
     // credited run: a rerun of the same code is a repeat of the result already
     // reacted to, and a rewrite since the complexity was recorded makes that
     // analysis stale. `None` is a run that earned no credit.
+    let all_passed =
+        total > 0 && payload.get("passed").and_then(serde_json::Value::as_i64) == Some(total);
     let mut since_previous = None;
     if let Some((code, language)) = submitted
         && super::real_test_run(payload)
@@ -437,6 +439,7 @@ fn apply_test_results(
             }
             _ => SincePrevious::Other,
         });
+        state.tested_passed = Some(all_passed);
         state.tested_code = Some(super::TestedCode {
             language: language.to_string(),
             code: code.to_string(),
@@ -471,6 +474,7 @@ fn apply_test_results(
             .is_some_and(|tested| tested.language == language)
     {
         state.tested_code = None;
+        state.tested_passed = None;
     }
     state.last_test_run = Some(payload.clone());
     state.test_runs += 1;
@@ -505,8 +509,6 @@ fn apply_test_results(
         };
     }
 
-    let all_passed =
-        total > 0 && payload.get("passed").and_then(serde_json::Value::as_i64) == Some(total);
     let summary = format_test_run_for_reaction(payload, state.test_runs);
     let excerpt = changed_excerpt(&state.language, &state.code_shown, &state.code);
     if excerpt.is_some() {
@@ -520,6 +522,8 @@ fn apply_test_results(
         test_runner_unavailable_reaction(&summary, excerpt.as_deref())
     } else if setup_error {
         test_setup_error_reaction(&summary, excerpt.as_deref())
+    } else if !credited && super::coding_continues_past_gate(state) {
+        super::prompts::uncredited_test_results_reaction(&summary, excerpt.as_deref(), state)
     } else {
         test_results_reaction(
             &summary,
